@@ -13,8 +13,9 @@
 #
 # Required repository secrets:
 #   OPENAI_API_KEY       - OpenAI API key for generating summaries
-#   VPS_SSH_PRIVATE_KEY  - SSH private key for VPS access
-#   VPS_SSH_USER         - SSH username on VPS (e.g., root)
+#   VPS_SSH_PRIVATE_KEY  - SSH private key for VPS access (PEM format)
+#   VPS_USER             - SSH username on VPS (e.g., shm)
+#   VPS_HOST             - VPS IP address or hostname
 # =============================================================================
 
 name: Deploy Articles
@@ -180,7 +181,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Auto-generate article summaries and manifest"
+            git commit -m "Auto-generate article summaries and manifest [skip ci]"
             git push
           fi
 
@@ -189,30 +190,47 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H 87.107.152.179 >> ~/.ssh/known_hosts 2>/dev/null
+          # Accept the VPS host key automatically
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          # Verify the key was written
+          echo "SSH key fingerprint:"
+          ssh-keygen -l -f ~/.ssh/id_rsa || echo "WARNING: SSH key may be invalid"
 
       - name: Deploy articles to VPS
         run: |
-          VPS_USER="${{ secrets.VPS_SSH_USER }}"
-          VPS_HOST="87.107.152.179"
+          VPS_USER="${{ secrets.VPS_USER }}"
+          VPS_HOST="${{ secrets.VPS_HOST }}"
           REMOTE_DIR="/opt/simorgh-articles"
 
+          if [ -z "$VPS_USER" ] || [ -z "$VPS_HOST" ]; then
+            echo "ERROR: Missing VPS_USER or VPS_HOST secret"
+            echo "Please add these secrets in GitHub repo Settings > Secrets"
+            exit 1
+          fi
+
+          echo "Deploying to ${VPS_HOST}:${REMOTE_DIR}"
+
           # Create remote directory if it doesn't exist
-          ssh "${VPS_USER}@${VPS_HOST}" "mkdir -p ${REMOTE_DIR}"
+          ssh -o StrictHostKeyChecking=accept-new \
+              "${VPS_USER}@${VPS_HOST}" \
+              "mkdir -p ${REMOTE_DIR}"
 
           # Sync articles directory to VPS
           rsync -avz --delete \
+            -e "ssh -o StrictHostKeyChecking=accept-new" \
             articles/ \
             "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 
-          echo "Articles deployed to ${VPS_HOST}:${REMOTE_DIR}"
+          echo "Articles deployed successfully"
 
-      - name: Restart landing-site container on VPS
+      - name: Restart nginx on VPS
         run: |
-          VPS_USER="${{ secrets.VPS_SSH_USER }}"
-          VPS_HOST="87.107.152.179"
+          VPS_USER="${{ secrets.VPS_USER }}"
+          VPS_HOST="${{ secrets.VPS_HOST }}"
 
-          # Restart landing-site so it picks up the new articles volume
-          ssh "${VPS_USER}@${VPS_HOST}" "cd /opt/simorghai-vps && docker compose restart landing-site nginx-proxy || true"
+          # Restart nginx so it picks up the new articles volume
+          ssh -o StrictHostKeyChecking=accept-new \
+              "${VPS_USER}@${VPS_HOST}" \
+              "cd /opt/simorghai-vps && docker compose restart nginx-proxy || true"
 
-          echo "Landing site restarted"
+          echo "Nginx restarted"
