@@ -3,7 +3,7 @@
 # =============================================================================
 # Triggers on push to main when articles/ directory changes.
 # For each article directory:
-#   1. Reads en.pdf and fa.pdf
+#   1. Reads meta.json to find PDF filenames (or falls back to en.pdf/fa.pdf)
 #   2. Extracts text from PDFs using PyMuPDF
 #   3. Calls OpenAI API to generate concise summaries
 #   4. Writes summary_en.txt and summary_fa.txt
@@ -94,27 +94,53 @@ jobs:
               slug = os.path.basename(article_dir.rstrip('/'))
               print(f"Processing: {slug}")
 
-              en_path = os.path.join(article_dir, "en.pdf")
-              fa_path = os.path.join(article_dir, "fa.pdf")
               meta_path = os.path.join(article_dir, "meta.json")
-
-              if not (os.path.exists(en_path) and os.path.exists(fa_path)):
-                  print(f"  Skipping {slug}: missing en.pdf or fa.pdf")
-                  continue
-
-              print(f"  Extracting text from en.pdf...")
-              en_text = extract_pdf_text(en_path)
-              print(f"  Extracting text from fa.pdf...")
-              fa_text = extract_pdf_text(fa_path)
-
-              if not en_text: print("  Warning: No text extracted from en.pdf")
-              if not fa_text: print("  Warning: No text extracted from fa.pdf")
-
               meta = {"title_en": slug, "title_fa": slug, "author": "", "date": "", "tags": []}
               if os.path.exists(meta_path):
                   with open(meta_path, 'r', encoding='utf-8') as f:
                       meta.update(json.load(f))
 
+              # Resolve PDF filenames: meta.json files > en.pdf/fa.pdf fallback
+              files_conf = meta.get("files", {})
+              en_filename = files_conf.get("en", "en.pdf")
+              fa_filename = files_conf.get("fa", "fa.pdf")
+              en_path = os.path.join(article_dir, en_filename)
+              fa_path = os.path.join(article_dir, fa_filename)
+
+              # Find PDFs in directory
+              all_pdfs = glob.glob(os.path.join(article_dir, "*.pdf"))
+              if not all_pdfs:
+                  print(f"  Skipping {slug}: no PDF files found")
+                  continue
+
+              en_exists = os.path.exists(en_path)
+              fa_exists = os.path.exists(fa_path)
+
+              if not en_exists and not fa_exists:
+                  print(f"  Warning: configured PDFs not found, using first available")
+                  en_path = all_pdfs[0]
+                  en_filename = os.path.basename(en_path)
+                  en_exists = True
+                  if len(all_pdfs) > 1:
+                      fa_path = all_pdfs[1]
+                      fa_filename = os.path.basename(fa_path)
+                      fa_exists = True
+
+              # Extract text
+              en_text = ""
+              fa_text = ""
+              if en_exists:
+                  print(f"  Extracting text from {en_filename}...")
+                  en_text = extract_pdf_text(en_path)
+                  if not en_text:
+                      print(f"  Warning: No text extracted from {en_filename}")
+              if fa_exists:
+                  print(f"  Extracting text from {fa_filename}...")
+                  fa_text = extract_pdf_text(fa_path)
+                  if not fa_text:
+                      print(f"  Warning: No text extracted from {fa_filename}")
+
+              # Generate summaries
               summary_en = get_summary(en_text, "en") if en_text else meta.get("title_en", slug)
               summary_fa = get_summary(fa_text, "fa") if fa_text else meta.get("title_fa", slug)
 
@@ -138,8 +164,8 @@ jobs:
                   "date": meta.get("date", ""),
                   "tags": meta.get("tags", []),
                   "files": {
-                      "en": f"{slug}/en.pdf",
-                      "fa": f"{slug}/fa.pdf"
+                      "en": f"{slug}/{en_filename}",
+                      "fa": f"{slug}/{fa_filename}" if fa_exists else f"{slug}/{en_filename}"
                   }
               })
 
