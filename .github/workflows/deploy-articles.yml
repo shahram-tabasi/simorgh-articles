@@ -1,22 +1,3 @@
-# =============================================================================
-# Simorgh Articles - Auto Summarize & Deploy to VPS
-# =============================================================================
-# Triggers on push to main when articles/ directory changes.
-# For each article directory:
-#   1. Reads en.pdf and fa.pdf
-#   2. Extracts text from PDFs using PyMuPDF
-#   3. Calls OpenAI API to generate concise summaries
-#   4. Writes summary_en.txt and summary_fa.txt
-#   5. Builds articles.json manifest
-#   6. Deploys everything to VPS at /opt/simorgh-articles/
-# =============================================================================
-#
-# Required repository secrets:
-#   OPENAI_API_KEY       - OpenAI API key for generating summaries
-#   VPS_SSH_PRIVATE_KEY  - SSH private key for VPS access
-#   VPS_SSH_USER         - SSH username on VPS (e.g., root)
-# =============================================================================
-
 name: Deploy Articles
 
 on:
@@ -61,7 +42,6 @@ jobs:
           manifest = []
 
           def extract_pdf_text(pdf_path):
-              """Extract text from a PDF file using PyMuPDF."""
               text = ""
               with fitz.open(pdf_path) as doc:
                   for page in doc:
@@ -69,9 +49,7 @@ jobs:
               return text.strip()
 
           def get_summary(text, language):
-              """Get a concise summary from OpenAI."""
               lang_label = "English" if language == "en" else "Persian (Farsi)"
-              # Truncate to ~12000 chars to stay within token limits
               if len(text) > 12000:
                   text = text[:12000] + "\n...[truncated]"
               try:
@@ -90,10 +68,8 @@ jobs:
                   return response.choices[0].message.content.strip()
               except Exception as e:
                   print(f"  Warning: OpenAI API error for {lang_label}: {e}")
-                  # Fallback: use first 200 characters of extracted text
-                  return text[:200].rsplit(' ', 1)[0] + "..."
+                  return text[:200].rsplit(' ', 1)[0] + "..." if text else "Summary not available"
 
-          # Process each article directory
           for article_dir in sorted(glob.glob(f"{articles_dir}/*/")):
               slug = os.path.basename(article_dir.rstrip('/'))
               print(f"Processing: {slug}")
@@ -102,54 +78,36 @@ jobs:
               fa_path = os.path.join(article_dir, "fa.pdf")
               meta_path = os.path.join(article_dir, "meta.json")
 
-              if not os.path.exists(en_path) or not os.path.exists(fa_path):
+              if not (os.path.exists(en_path) and os.path.exists(fa_path)):
                   print(f"  Skipping {slug}: missing en.pdf or fa.pdf")
                   continue
 
-              # Extract text from PDFs
               print(f"  Extracting text from en.pdf...")
               en_text = extract_pdf_text(en_path)
               print(f"  Extracting text from fa.pdf...")
               fa_text = extract_pdf_text(fa_path)
 
-              if not en_text:
-                  print(f"  Warning: No text extracted from en.pdf (scanned image PDF?)")
-              if not fa_text:
-                  print(f"  Warning: No text extracted from fa.pdf (scanned image PDF?)")
+              if not en_text: print("  Warning: No text extracted from en.pdf")
+              if not fa_text: print("  Warning: No text extracted from fa.pdf")
 
-              # Read metadata
               meta = {"title_en": slug, "title_fa": slug, "author": "", "date": "", "tags": []}
               if os.path.exists(meta_path):
-                  with open(meta_path, 'r') as f:
+                  with open(meta_path, 'r', encoding='utf-8') as f:
                       meta.update(json.load(f))
 
-              # Generate summaries
-              summary_en = ""
-              summary_fa = ""
-              if en_text:
-                  print(f"  Generating English summary...")
-                  summary_en = get_summary(en_text, "en")
-              else:
-                  summary_en = meta.get("title_en", slug)
+              summary_en = get_summary(en_text, "en") if en_text else meta.get("title_en", slug)
+              summary_fa = get_summary(fa_text, "fa") if fa_text else meta.get("title_fa", slug)
 
-              if fa_text:
-                  print(f"  Generating Persian summary...")
-                  summary_fa = get_summary(fa_text, "fa")
-              else:
-                  summary_fa = meta.get("title_fa", slug)
-
-              # Write summary files
               summary_en_path = os.path.join(article_dir, "summary_en.txt")
               summary_fa_path = os.path.join(article_dir, "summary_fa.txt")
-              with open(summary_en_path, 'w') as f:
+              with open(summary_en_path, 'w', encoding='utf-8') as f:
                   f.write(summary_en)
-              with open(summary_fa_path, 'w') as f:
+              with open(summary_fa_path, 'w', encoding='utf-8') as f:
                   f.write(summary_fa)
 
               print(f"  EN summary: {summary_en[:80]}...")
               print(f"  FA summary: {summary_fa[:80]}...")
 
-              # Add to manifest
               manifest.append({
                   "slug": slug,
                   "title_en": meta.get("title_en", slug),
@@ -165,9 +123,8 @@ jobs:
                   }
               })
 
-          # Write manifest
           manifest_path = os.path.join(articles_dir, "articles.json")
-          with open(manifest_path, 'w') as f:
+          with open(manifest_path, 'w', encoding='utf-8') as f:
               json.dump(manifest, f, ensure_ascii=False, indent=2)
 
           print(f"\nManifest written with {len(manifest)} article(s)")
@@ -177,12 +134,14 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
           git add articles/
+          
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Auto-generate article summaries and manifest"
-            git push
+            git commit -m "chore: auto-generate article summaries and manifest [skip ci]"
+            git push origin HEAD:main
           fi
 
       - name: Setup SSH key
@@ -190,30 +149,42 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H 87.107.152.179 >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Deploy articles to VPS
         run: |
-          VPS_USER="${{ secrets.VPS_SSH_USER }}"
-          VPS_HOST="87.107.152.179"
+          VPS_USER="${{ secrets.VPS_USER }}"
+          VPS_HOST="${{ secrets.VPS_HOST }}"
           REMOTE_DIR="/opt/simorgh-articles"
 
-          # Create remote directory if it doesn't exist
-          ssh "${VPS_USER}@${VPS_HOST}" "mkdir -p ${REMOTE_DIR}"
+          if [ -z "$VPS_USER" ] || [ -z "$VPS_HOST" ]; then
+            echo "ERROR: Missing VPS_USER or VPS_HOST secret"
+            exit 1
+          fi
 
-          # Sync articles directory to VPS
+          echo "Deploying to $VPS_USER@$VPS_HOST:$REMOTE_DIR"
+
+          ssh -o StrictHostKeyChecking=no \
+              "${VPS_USER}@${VPS_HOST}" \
+              "mkdir -p ${REMOTE_DIR}" || {
+            echo "Failed to create remote directory"
+            exit 1
+          }
+
           rsync -avz --delete \
+            -e "ssh -o StrictHostKeyChecking=no" \
             articles/ \
             "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 
-          echo "Articles deployed to ${VPS_HOST}:${REMOTE_DIR}"
+          echo "Deployment completed"
 
       - name: Restart landing-site container on VPS
         run: |
-          VPS_USER="${{ secrets.VPS_SSH_USER }}"
-          VPS_HOST="87.107.152.179"
+          VPS_USER="${{ secrets.VPS_USER }}"
+          VPS_HOST="${{ secrets.VPS_HOST }}"
 
-          # Restart landing-site so it picks up the new articles volume
-          ssh "${VPS_USER}@${VPS_HOST}" "cd /opt/simorghai-vps && docker compose restart landing-site nginx-proxy || true"
+          ssh -o StrictHostKeyChecking=no \
+              "${VPS_USER}@${VPS_HOST}" \
+              "cd /opt/simorghai-vps && docker compose restart landing-site nginx-proxy || true"
 
-          echo "Landing site restarted"
+          echo "Containers restarted"
