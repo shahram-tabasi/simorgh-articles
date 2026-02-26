@@ -3,11 +3,12 @@
 # =============================================================================
 # Triggers on push to main when articles/ directory changes.
 # For each article directory:
-#   1. Reads en.md and fa.md
-#   2. Calls OpenAI API to generate concise summaries
-#   3. Writes summary_en.txt and summary_fa.txt
-#   4. Builds articles.json manifest
-#   5. SCPs everything to VPS at /opt/simorgh-articles/
+#   1. Reads en.pdf and fa.pdf
+#   2. Extracts text from PDFs using PyMuPDF
+#   3. Calls OpenAI API to generate concise summaries
+#   4. Writes summary_en.txt and summary_fa.txt
+#   5. Builds articles.json manifest
+#   6. Deploys everything to VPS at /opt/simorgh-articles/
 # =============================================================================
 #
 # Required repository secrets:
@@ -43,7 +44,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install openai
+        run: pip install openai PyMuPDF
 
       - name: Generate summaries and build manifest
         env:
@@ -51,15 +52,27 @@ jobs:
         run: |
           python3 << 'PYEOF'
           import os, json, glob
+          import fitz  # PyMuPDF
           from openai import OpenAI
 
           client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
           articles_dir = "articles"
           manifest = []
 
+          def extract_pdf_text(pdf_path):
+              """Extract text from a PDF file using PyMuPDF."""
+              text = ""
+              with fitz.open(pdf_path) as doc:
+                  for page in doc:
+                      text += page.get_text()
+              return text.strip()
+
           def get_summary(text, language):
               """Get a concise summary from OpenAI."""
               lang_label = "English" if language == "en" else "Persian (Farsi)"
+              # Truncate to ~12000 chars to stay within token limits
+              if len(text) > 12000:
+                  text = text[:12000] + "\n...[truncated]"
               try:
                   response = client.chat.completions.create(
                       model="gpt-4o-mini",
@@ -76,7 +89,7 @@ jobs:
                   return response.choices[0].message.content.strip()
               except Exception as e:
                   print(f"  Warning: OpenAI API error for {lang_label}: {e}")
-                  # Fallback: use first 200 characters
+                  # Fallback: use first 200 characters of extracted text
                   return text[:200].rsplit(' ', 1)[0] + "..."
 
           # Process each article directory
@@ -84,19 +97,24 @@ jobs:
               slug = os.path.basename(article_dir.rstrip('/'))
               print(f"Processing: {slug}")
 
-              en_path = os.path.join(article_dir, "en.md")
-              fa_path = os.path.join(article_dir, "fa.md")
+              en_path = os.path.join(article_dir, "en.pdf")
+              fa_path = os.path.join(article_dir, "fa.pdf")
               meta_path = os.path.join(article_dir, "meta.json")
 
               if not os.path.exists(en_path) or not os.path.exists(fa_path):
-                  print(f"  Skipping {slug}: missing en.md or fa.md")
+                  print(f"  Skipping {slug}: missing en.pdf or fa.pdf")
                   continue
 
-              # Read article content
-              with open(en_path, 'r') as f:
-                  en_content = f.read()
-              with open(fa_path, 'r') as f:
-                  fa_content = f.read()
+              # Extract text from PDFs
+              print(f"  Extracting text from en.pdf...")
+              en_text = extract_pdf_text(en_path)
+              print(f"  Extracting text from fa.pdf...")
+              fa_text = extract_pdf_text(fa_path)
+
+              if not en_text:
+                  print(f"  Warning: No text extracted from en.pdf (scanned image PDF?)")
+              if not fa_text:
+                  print(f"  Warning: No text extracted from fa.pdf (scanned image PDF?)")
 
               # Read metadata
               meta = {"title_en": slug, "title_fa": slug, "author": "", "date": "", "tags": []}
@@ -105,10 +123,19 @@ jobs:
                       meta.update(json.load(f))
 
               # Generate summaries
-              print(f"  Generating English summary...")
-              summary_en = get_summary(en_content, "en")
-              print(f"  Generating Persian summary...")
-              summary_fa = get_summary(fa_content, "fa")
+              summary_en = ""
+              summary_fa = ""
+              if en_text:
+                  print(f"  Generating English summary...")
+                  summary_en = get_summary(en_text, "en")
+              else:
+                  summary_en = meta.get("title_en", slug)
+
+              if fa_text:
+                  print(f"  Generating Persian summary...")
+                  summary_fa = get_summary(fa_text, "fa")
+              else:
+                  summary_fa = meta.get("title_fa", slug)
 
               # Write summary files
               summary_en_path = os.path.join(article_dir, "summary_en.txt")
@@ -132,8 +159,8 @@ jobs:
                   "date": meta.get("date", ""),
                   "tags": meta.get("tags", []),
                   "files": {
-                      "en": f"{slug}/en.md",
-                      "fa": f"{slug}/fa.md"
+                      "en": f"{slug}/en.pdf",
+                      "fa": f"{slug}/fa.pdf"
                   }
               })
 

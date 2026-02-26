@@ -9,8 +9,8 @@ Technology articles for the Simorgh AI website. Push a new article directory and
 
 ```
 articles/my-new-topic/
-├── en.md          # English article (Markdown)
-├── fa.md          # Persian article (Markdown)
+├── en.pdf         # English article (PDF)
+├── fa.pdf         # Persian article (PDF)
 └── meta.json      # Metadata (title, author, date, tags)
 ```
 
@@ -27,7 +27,7 @@ articles/my-new-topic/
 ```
 
 4. Push to `main` branch. The GitHub Actions workflow will:
-   - Generate EN and FA summaries using OpenAI API
+   - Extract text from PDFs and generate EN and FA summaries using OpenAI API
    - Build `articles.json` manifest
    - Deploy everything to the VPS via rsync/SSH
    - Restart the landing site container
