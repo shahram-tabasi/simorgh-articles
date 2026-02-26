@@ -3,8 +3,8 @@
     "slug": "sample-ai-introduction",
     "title_en": "Introduction to Artificial Intelligence",
     "title_fa": "مقدمه‌ای بر هوش مصنوعی",
-    "summary_en": "# Introduction to Artificial Intelligence\n\nArtificial Intelligence (AI) is a branch of computer science that aims to create systems capable of performing tasks that typically require human...",
-    "summary_fa": "# مقدمه‌ای بر هوش مصنوعی\n\nهوش مصنوعی (AI) شاخه‌ای از علوم کامپیوتر است که هدف آن ایجاد سیستم‌هایی است که قادر به انجام وظایفی هستند که معمولاً به هوش انسانی نیاز دارند. این وظایف شامل درک بصری، تشخیص...",
+    "summary_en": "Introduction to Artificial Intelligence",
+    "summary_fa": "مقدمه‌ای بر هوش مصنوعی",
     "author": "Simorgh AI Team",
     "date": "2026-02-26",
     "tags": [
@@ -13,8 +13,8 @@
       "Technology"
     ],
     "files": {
-      "en": "sample-ai-introduction/en.md",
-      "fa": "sample-ai-introduction/fa.md"
+      "en": "sample-ai-introduction/en.pdf",
+      "fa": "sample-ai-introduction/fa.pdf"
     }
   }
 ]
