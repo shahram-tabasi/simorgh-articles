@@ -1,0 +1,3 @@
+# Introduction to Artificial Intelligence
+
+Artificial Intelligence (AI) is a branch of computer science that aims to create systems capable of performing tasks that typically require human...
