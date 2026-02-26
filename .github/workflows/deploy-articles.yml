@@ -1,0 +1,191 @@
+# =============================================================================
+# Simorgh Articles - Auto Summarize & Deploy to VPS
+# =============================================================================
+# Triggers on push to main when articles/ directory changes.
+# For each article directory:
+#   1. Reads en.md and fa.md
+#   2. Calls OpenAI API to generate concise summaries
+#   3. Writes summary_en.txt and summary_fa.txt
+#   4. Builds articles.json manifest
+#   5. SCPs everything to VPS at /opt/simorgh-articles/
+# =============================================================================
+#
+# Required repository secrets:
+#   OPENAI_API_KEY       - OpenAI API key for generating summaries
+#   VPS_SSH_PRIVATE_KEY  - SSH private key for VPS access
+#   VPS_SSH_USER         - SSH username on VPS (e.g., root)
+# =============================================================================
+
+name: Deploy Articles
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'articles/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  summarize-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install openai
+
+      - name: Generate summaries and build manifest
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python3 << 'PYEOF'
+          import os, json, glob
+          from openai import OpenAI
+
+          client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+          articles_dir = "articles"
+          manifest = []
+
+          def get_summary(text, language):
+              """Get a concise summary from OpenAI."""
+              lang_label = "English" if language == "en" else "Persian (Farsi)"
+              try:
+                  response = client.chat.completions.create(
+                      model="gpt-4o-mini",
+                      messages=[
+                          {
+                              "role": "system",
+                              "content": f"You are a helpful assistant. Provide a concise summary (2-3 sentences) of the following article in {lang_label}. Return ONLY the summary text, nothing else."
+                          },
+                          {"role": "user", "content": text}
+                      ],
+                      max_tokens=300,
+                      temperature=0.3
+                  )
+                  return response.choices[0].message.content.strip()
+              except Exception as e:
+                  print(f"  Warning: OpenAI API error for {lang_label}: {e}")
+                  # Fallback: use first 200 characters
+                  return text[:200].rsplit(' ', 1)[0] + "..."
+
+          # Process each article directory
+          for article_dir in sorted(glob.glob(f"{articles_dir}/*/")):
+              slug = os.path.basename(article_dir.rstrip('/'))
+              print(f"Processing: {slug}")
+
+              en_path = os.path.join(article_dir, "en.md")
+              fa_path = os.path.join(article_dir, "fa.md")
+              meta_path = os.path.join(article_dir, "meta.json")
+
+              if not os.path.exists(en_path) or not os.path.exists(fa_path):
+                  print(f"  Skipping {slug}: missing en.md or fa.md")
+                  continue
+
+              # Read article content
+              with open(en_path, 'r') as f:
+                  en_content = f.read()
+              with open(fa_path, 'r') as f:
+                  fa_content = f.read()
+
+              # Read metadata
+              meta = {"title_en": slug, "title_fa": slug, "author": "", "date": "", "tags": []}
+              if os.path.exists(meta_path):
+                  with open(meta_path, 'r') as f:
+                      meta.update(json.load(f))
+
+              # Generate summaries
+              print(f"  Generating English summary...")
+              summary_en = get_summary(en_content, "en")
+              print(f"  Generating Persian summary...")
+              summary_fa = get_summary(fa_content, "fa")
+
+              # Write summary files
+              summary_en_path = os.path.join(article_dir, "summary_en.txt")
+              summary_fa_path = os.path.join(article_dir, "summary_fa.txt")
+              with open(summary_en_path, 'w') as f:
+                  f.write(summary_en)
+              with open(summary_fa_path, 'w') as f:
+                  f.write(summary_fa)
+
+              print(f"  EN summary: {summary_en[:80]}...")
+              print(f"  FA summary: {summary_fa[:80]}...")
+
+              # Add to manifest
+              manifest.append({
+                  "slug": slug,
+                  "title_en": meta.get("title_en", slug),
+                  "title_fa": meta.get("title_fa", slug),
+                  "summary_en": summary_en,
+                  "summary_fa": summary_fa,
+                  "author": meta.get("author", ""),
+                  "date": meta.get("date", ""),
+                  "tags": meta.get("tags", []),
+                  "files": {
+                      "en": f"{slug}/en.md",
+                      "fa": f"{slug}/fa.md"
+                  }
+              })
+
+          # Write manifest
+          manifest_path = os.path.join(articles_dir, "articles.json")
+          with open(manifest_path, 'w') as f:
+              json.dump(manifest, f, ensure_ascii=False, indent=2)
+
+          print(f"\nManifest written with {len(manifest)} article(s)")
+          PYEOF
+
+      - name: Commit summaries and manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add articles/
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto-generate article summaries and manifest"
+            git push
+          fi
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 87.107.152.179 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy articles to VPS
+        run: |
+          VPS_USER="${{ secrets.VPS_SSH_USER }}"
+          VPS_HOST="87.107.152.179"
+          REMOTE_DIR="/opt/simorgh-articles"
+
+          # Create remote directory if it doesn't exist
+          ssh "${VPS_USER}@${VPS_HOST}" "mkdir -p ${REMOTE_DIR}"
+
+          # Sync articles directory to VPS
+          rsync -avz --delete \
+            articles/ \
+            "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
+
+          echo "Articles deployed to ${VPS_HOST}:${REMOTE_DIR}"
+
+      - name: Restart landing-site container on VPS
+        run: |
+          VPS_USER="${{ secrets.VPS_SSH_USER }}"
+          VPS_HOST="87.107.152.179"
+
+          # Restart landing-site so it picks up the new articles volume
+          ssh "${VPS_USER}@${VPS_HOST}" "cd /opt/simorghai-vps && docker compose restart landing-site nginx-proxy || true"
+
+          echo "Landing site restarted"
