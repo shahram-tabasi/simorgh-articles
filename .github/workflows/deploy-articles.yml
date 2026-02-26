@@ -189,11 +189,12 @@ jobs:
 
           echo "Deploying to ${VPS_HOST}:${REMOTE_DIR}"
 
-          # Create remote directory if it doesn't exist
+          # Create remote directory and ensure the deploy user owns it
           ssh -o StrictHostKeyChecking=accept-new \
               "${VPS_USER}@${VPS_HOST}" \
-              "mkdir -p ${REMOTE_DIR}"
+              "sudo mkdir -p ${REMOTE_DIR} && sudo chown -R ${VPS_USER}:${VPS_USER} ${REMOTE_DIR}"
 
+          # Sync articles directory to VPS
           rsync -avz --delete \
             -e "ssh -o StrictHostKeyChecking=accept-new" \
             articles/ \
