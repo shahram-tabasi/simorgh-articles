@@ -3,20 +3,20 @@
 # =============================================================================
 # Triggers on push to main when articles/ directory changes.
 # For each article directory:
-# 1. Reads en.pdf and fa.pdf
-# 2. Extracts text from PDFs using PyMuPDF
-# 3. Calls OpenAI API to generate concise summaries
-# 4. Writes summary_en.txt and summary_fa.txt
-# 5. Builds articles.json manifest
-# 6. Deploys everything to VPS at /opt/simorgh-articles/
+#   1. Reads en.pdf and fa.pdf
+#   2. Extracts text from PDFs using PyMuPDF
+#   3. Calls OpenAI API to generate concise summaries
+#   4. Writes summary_en.txt and summary_fa.txt
+#   5. Builds articles.json manifest
+#   6. Deploys everything to VPS at /opt/simorgh-articles/
 # =============================================================================
 #
 # Required repository secrets:
-# OPENAI_API_KEY      - OpenAI API key for generating summaries
-# VPS_SSH_PRIVATE_KEY - SSH private key for VPS access
-# VPS_SSH_USER        - SSH username on VPS (e.g., root)
-# GH_PAT              - Classic Personal Access Token with repo scope (for push)
+#   OPENAI_API_KEY       - OpenAI API key for generating summaries
+#   VPS_SSH_PRIVATE_KEY  - SSH private key for VPS access
+#   VPS_SSH_USER         - SSH username on VPS (e.g., root)
 # =============================================================================
+
 name: Deploy Articles
 
 on:
@@ -36,7 +36,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GH_PAT }}      # Use PAT here so push uses same auth
+          token: ${{ secrets.GH_PAT }}
           fetch-depth: 0
 
       - name: Setup Python
@@ -57,7 +57,6 @@ jobs:
           from openai import OpenAI
 
           client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-
           articles_dir = "articles"
           manifest = []
 
@@ -90,7 +89,7 @@ jobs:
                   )
                   return response.choices[0].message.content.strip()
               except Exception as e:
-                  print(f" Warning: OpenAI API error for {lang_label}: {e}")
+                  print(f"  Warning: OpenAI API error for {lang_label}: {e}")
                   # Fallback: use first 200 characters of extracted text
                   return text[:200].rsplit(' ', 1)[0] + "..."
 
@@ -104,19 +103,19 @@ jobs:
               meta_path = os.path.join(article_dir, "meta.json")
 
               if not os.path.exists(en_path) or not os.path.exists(fa_path):
-                  print(f" Skipping {slug}: missing en.pdf or fa.pdf")
+                  print(f"  Skipping {slug}: missing en.pdf or fa.pdf")
                   continue
 
               # Extract text from PDFs
-              print(f" Extracting text from en.pdf...")
+              print(f"  Extracting text from en.pdf...")
               en_text = extract_pdf_text(en_path)
-              print(f" Extracting text from fa.pdf...")
+              print(f"  Extracting text from fa.pdf...")
               fa_text = extract_pdf_text(fa_path)
 
               if not en_text:
-                  print(f" Warning: No text extracted from en.pdf (scanned image PDF?)")
+                  print(f"  Warning: No text extracted from en.pdf (scanned image PDF?)")
               if not fa_text:
-                  print(f" Warning: No text extracted from fa.pdf (scanned image PDF?)")
+                  print(f"  Warning: No text extracted from fa.pdf (scanned image PDF?)")
 
               # Read metadata
               meta = {"title_en": slug, "title_fa": slug, "author": "", "date": "", "tags": []}
@@ -128,13 +127,13 @@ jobs:
               summary_en = ""
               summary_fa = ""
               if en_text:
-                  print(f" Generating English summary...")
+                  print(f"  Generating English summary...")
                   summary_en = get_summary(en_text, "en")
               else:
                   summary_en = meta.get("title_en", slug)
 
               if fa_text:
-                  print(f" Generating Persian summary...")
+                  print(f"  Generating Persian summary...")
                   summary_fa = get_summary(fa_text, "fa")
               else:
                   summary_fa = meta.get("title_fa", slug)
@@ -147,8 +146,8 @@ jobs:
               with open(summary_fa_path, 'w') as f:
                   f.write(summary_fa)
 
-              print(f" EN summary: {summary_en[:80]}...")
-              print(f" FA summary: {summary_fa[:80]}...")
+              print(f"  EN summary: {summary_en[:80]}...")
+              print(f"  FA summary: {summary_fa[:80]}...")
 
               # Add to manifest
               manifest.append({
@@ -175,19 +174,15 @@ jobs:
           PYEOF
 
       - name: Commit summaries and manifest
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git add articles/
-
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: auto-generate article summaries and manifest [skip ci]"
-            git push origin HEAD:main
+            git commit -m "Auto-generate article summaries and manifest"
+            git push
           fi
 
       - name: Setup SSH key
@@ -220,4 +215,5 @@ jobs:
 
           # Restart landing-site so it picks up the new articles volume
           ssh "${VPS_USER}@${VPS_HOST}" "cd /opt/simorghai-vps && docker compose restart landing-site nginx-proxy || true"
+
           echo "Landing site restarted"
