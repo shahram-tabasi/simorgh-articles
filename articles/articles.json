@@ -1,5 +1,23 @@
 [
   {
+    "slug": "A New Age of Nations",
+    "title_en": "A New Age of Nations",
+    "title_fa": "عصر جدیدی از ملت‌ها",
+    "summary_en": "The article discusses the implications of artificial intelligence (AI) on national competitive advantage, emphasizing that success in the AI era will depend more on societal integration and the ability to manage AI's effects than on technological mastery alone. It identifies key societal characteristics essential for competitiveness and warns that AI could either strengthen or destabilize these foundations, ultimately shaping the future of nations in a rapidly evolving technological landscape. The analysis calls for U.S. policymakers to adopt a broader perspective on societal factors to maintain national advantage in the AI era.",
+    "summary_fa": "در این مقاله، منابع مزیت رقابتی ملی در عصر هوش مصنوعی بررسی می‌شود. نویسنده با استفاده از تحلیل‌های قبلی، تأثیر هوش مصنوعی بر ویژگی‌های رقابت‌پذیری ملی را ارزیابی کرده و به ارائه استراتژی‌هایی برای تقویت این مزیت‌ها در ایالات متحده می‌پردازد. در نهایت، تأکید بر اهمیت سیاست‌گذاری‌های اجتماعی و اقتصادی برای بهره‌برداری از فرصت‌های هوش مصنوعی و کاهش چالش‌های ناشی از آن است.",
+    "author": "Simorgh AI Team",
+    "date": "2026-02-26",
+    "tags": [
+      "Geopolitics",
+      "Nations",
+      "History"
+    ],
+    "files": {
+      "en": "A New Age of Nations/A New Age of Nations.pdf",
+      "fa": "A New Age of Nations/عصر جدیدی از ملت‌ها.pdf"
+    }
+  },
+  {
     "slug": "sample-ai-introduction",
     "title_en": "Introduction to Artificial Intelligence",
     "title_fa": "مقدمه‌ای بر هوش مصنوعی",
